@@ -17590,6 +17590,9 @@ spec:
                       - size
                       type: object
                     type: array
+                    x-kubernetes-list-type: map
+                    x-kubernetes-list-map-keys:
+                    - metadata.name
                   dseWorkloads:
                     properties:
                       analyticsEnabled:
