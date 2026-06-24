@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.4
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: stargates.stargate.k8ssandra.io
 spec:
   group: stargate.k8ssandra.io
@@ -633,8 +633,8 @@ spec:
                           most preferred is the one with the greatest sum of weights, i.e.
                           for each node that meets all of the scheduling requirements (resource
                           request, requiredDuringScheduling anti-affinity expressions, etc.),
-                          compute a sum by iterating through the elements of this field and adding
-                          "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                          compute a sum by iterating through the elements of this field and subtracting
+                          "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                           node(s) with the highest sum are the most preferred.
                         items:
                           description: The weights of all of the matched WeightedPodAffinityTerm
@@ -2100,8 +2100,8 @@ spec:
                                 most preferred is the one with the greatest sum of weights, i.e.
                                 for each node that meets all of the scheduling requirements (resource
                                 request, requiredDuringScheduling anti-affinity expressions, etc.),
-                                compute a sum by iterating through the elements of this field and adding
-                                "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                                compute a sum by iterating through the elements of this field and subtracting
+                                "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                                 node(s) with the highest sum are the most preferred.
                               items:
                                 description: The weights of all of the matched WeightedPodAffinityTerm
@@ -2942,7 +2942,7 @@ spec:
                             Claims lists the names of resources, defined in spec.resourceClaims,
                             that are used by this container.
 
-                            This is an alpha field and requires enabling the
+                            This field depends on the
                             DynamicResourceAllocation feature gate.
 
                             This field is immutable. It can only be set for containers.
@@ -3022,58 +3022,111 @@ spec:
                                   type: string
                                 port:
                                   type: string
+                                tls:
+                                  properties:
+                                    ca.crt:
+                                      type: string
+                                    tls.crt:
+                                      type: string
+                                    tls.key:
+                                      type: string
+                                  type: object
                               type: object
                             relabels:
                               items:
                                 description: |-
-                                  RelabelConfig allows dynamic rewriting of the label set, being applied to samples before ingestion.
-                                  It defines `<metric_relabel_configs>`-section of Prometheus configuration.
-                                  More info: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#metric_relabel_configs
+                                  RelabelConfig allows dynamic rewriting of the label set for targets, alerts,
+                                  scraped samples and remote write samples.
+
+                                  More info: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config
                                 properties:
                                   action:
-                                    description: Action to perform based on regex
-                                      matching. Default is 'replace'
+                                    default: replace
+                                    description: |-
+                                      action to perform based on the regex matching.
+
+                                      `Uppercase` and `Lowercase` actions require Prometheus >= v2.36.0.
+                                      `DropEqual` and `KeepEqual` actions require Prometheus >= v2.41.0.
+
+                                      Default: "Replace"
+                                    enum:
+                                    - replace
+                                    - Replace
+                                    - keep
+                                    - Keep
+                                    - drop
+                                    - Drop
+                                    - hashmod
+                                    - HashMod
+                                    - labelmap
+                                    - LabelMap
+                                    - labeldrop
+                                    - LabelDrop
+                                    - labelkeep
+                                    - LabelKeep
+                                    - lowercase
+                                    - Lowercase
+                                    - uppercase
+                                    - Uppercase
+                                    - keepequal
+                                    - KeepEqual
+                                    - dropequal
+                                    - DropEqual
                                     type: string
                                   modulus:
-                                    description: Modulus to take of the hash of the
-                                      source label values.
+                                    description: |-
+                                      modulus to take of the hash of the source label values.
+
+                                      Only applicable when the action is `HashMod`.
                                     format: int64
                                     type: integer
                                   regex:
-                                    description: Regular expression against which
-                                      the extracted value is matched. Default is '(.*)'
+                                    description: regex defines the regular expression
+                                      against which the extracted value is matched.
                                     type: string
                                   replacement:
                                     description: |-
-                                      Replacement value against which a regex replace is performed if the
-                                      regular expression matches. Regex capture groups are available. Default is '$1'
+                                      replacement value against which a Replace action is performed if the
+                                      regular expression matches.
+
+                                      Regex capture groups are available.
                                     type: string
                                   separator:
-                                    description: Separator placed between concatenated
-                                      source label values. default is ';'.
+                                    description: separator defines the string between
+                                      concatenated SourceLabels.
                                     type: string
                                   sourceLabels:
                                     description: |-
-                                      The source labels select values from existing labels. Their content is concatenated
-                                      using the configured separator and matched against the configured regular expression
-                                      for the replace, keep, and drop actions.
+                                      sourceLabels defines the source labels select values from existing labels. Their content is
+                                      concatenated using the configured Separator and matched against the
+                                      configured regular expression.
                                     items:
+                                      description: |-
+                                        LabelName is a valid Prometheus label name.
+                                        For Prometheus 3.x, a label name is valid if it contains UTF-8 characters.
+                                        For Prometheus 2.x, a label name is only valid if it contains ASCII characters, letters, numbers, as well as underscores.
                                       type: string
                                     type: array
                                   targetLabel:
                                     description: |-
-                                      Label to which the resulting value is written in a replace action.
-                                      It is mandatory for replace actions. Regex capture groups are available.
+                                      targetLabel defines the label to which the resulting string is written in a replacement.
+
+                                      It is mandatory for `Replace`, `HashMod`, `Lowercase`, `Uppercase`,
+                                      `KeepEqual` and `DropEqual` actions.
+
+                                      Regex capture groups are available.
                                     type: string
                                 type: object
                               type: array
                           type: object
                         mcac:
+                          description: DEPRECATED MCAC has been deprecated in favor
+                            of the new metrics endpoint
                           properties:
                             enabled:
                               description: |-
                                 enabled sets whether MCAC (legacy metrics endpoint) is enabled.
-                                This is considered true by default.
+                                This is considered false by default.
                               type: boolean
                             metricFilters:
                               description: |-
@@ -3188,15 +3241,19 @@ spec:
                                     type: object
                                   type: array
                               type: object
+                            config:
+                              description: |-
+                                Config is raw TOML merged into the generated Vector configuration.
+                                This can be used to set global Vector options or anything that does not fit the components model.
+                              type: string
                             enabled:
                               description: |-
                                 Enabled enables the Vector agent for this resource (Cassandra, Reaper or Stargate).
                                 Enabling the vector agent will inject a sidecar container into the pod.
                               type: boolean
                             image:
-                              description: |-
-                                Image is the name of the Vector image to use. If not set, the default image will be used.
-                                kube:default="timberio/vector:0.26.0-alpine"
+                              description: Image is the name of the Vector image to
+                                use. If not set, the default image will be used.
                               type: string
                             resources:
                               description: Resources is the resource requirements
@@ -3207,7 +3264,7 @@ spec:
                                     Claims lists the names of resources, defined in spec.resourceClaims,
                                     that are used by this container.
 
-                                    This is an alpha field and requires enabling the
+                                    This field depends on the
                                     DynamicResourceAllocation feature gate.
 
                                     This field is immutable. It can only be set for containers.
@@ -3290,9 +3347,10 @@ spec:
                           operator:
                             description: |-
                               Operator represents a key's relationship to the value.
-                              Valid operators are Exists and Equal. Defaults to Equal.
+                              Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                               Exists is equivalent to wildcard for value, so that a pod can
                               tolerate all taints of a particular category.
+                              Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                             type: string
                           tolerationSeconds:
                             description: |-
@@ -3475,7 +3533,7 @@ spec:
                       Claims lists the names of resources, defined in spec.resourceClaims,
                       that are used by this container.
 
-                      This is an alpha field and requires enabling the
+                      This field depends on the
                       DynamicResourceAllocation feature gate.
 
                       This field is immutable. It can only be set for containers.
@@ -3562,58 +3620,111 @@ spec:
                             type: string
                           port:
                             type: string
+                          tls:
+                            properties:
+                              ca.crt:
+                                type: string
+                              tls.crt:
+                                type: string
+                              tls.key:
+                                type: string
+                            type: object
                         type: object
                       relabels:
                         items:
                           description: |-
-                            RelabelConfig allows dynamic rewriting of the label set, being applied to samples before ingestion.
-                            It defines `<metric_relabel_configs>`-section of Prometheus configuration.
-                            More info: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#metric_relabel_configs
+                            RelabelConfig allows dynamic rewriting of the label set for targets, alerts,
+                            scraped samples and remote write samples.
+
+                            More info: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config
                           properties:
                             action:
-                              description: Action to perform based on regex matching.
-                                Default is 'replace'
+                              default: replace
+                              description: |-
+                                action to perform based on the regex matching.
+
+                                `Uppercase` and `Lowercase` actions require Prometheus >= v2.36.0.
+                                `DropEqual` and `KeepEqual` actions require Prometheus >= v2.41.0.
+
+                                Default: "Replace"
+                              enum:
+                              - replace
+                              - Replace
+                              - keep
+                              - Keep
+                              - drop
+                              - Drop
+                              - hashmod
+                              - HashMod
+                              - labelmap
+                              - LabelMap
+                              - labeldrop
+                              - LabelDrop
+                              - labelkeep
+                              - LabelKeep
+                              - lowercase
+                              - Lowercase
+                              - uppercase
+                              - Uppercase
+                              - keepequal
+                              - KeepEqual
+                              - dropequal
+                              - DropEqual
                               type: string
                             modulus:
-                              description: Modulus to take of the hash of the source
-                                label values.
+                              description: |-
+                                modulus to take of the hash of the source label values.
+
+                                Only applicable when the action is `HashMod`.
                               format: int64
                               type: integer
                             regex:
-                              description: Regular expression against which the extracted
-                                value is matched. Default is '(.*)'
+                              description: regex defines the regular expression against
+                                which the extracted value is matched.
                               type: string
                             replacement:
                               description: |-
-                                Replacement value against which a regex replace is performed if the
-                                regular expression matches. Regex capture groups are available. Default is '$1'
+                                replacement value against which a Replace action is performed if the
+                                regular expression matches.
+
+                                Regex capture groups are available.
                               type: string
                             separator:
-                              description: Separator placed between concatenated source
-                                label values. default is ';'.
+                              description: separator defines the string between concatenated
+                                SourceLabels.
                               type: string
                             sourceLabels:
                               description: |-
-                                The source labels select values from existing labels. Their content is concatenated
-                                using the configured separator and matched against the configured regular expression
-                                for the replace, keep, and drop actions.
+                                sourceLabels defines the source labels select values from existing labels. Their content is
+                                concatenated using the configured Separator and matched against the
+                                configured regular expression.
                               items:
+                                description: |-
+                                  LabelName is a valid Prometheus label name.
+                                  For Prometheus 3.x, a label name is valid if it contains UTF-8 characters.
+                                  For Prometheus 2.x, a label name is only valid if it contains ASCII characters, letters, numbers, as well as underscores.
                                 type: string
                               type: array
                             targetLabel:
                               description: |-
-                                Label to which the resulting value is written in a replace action.
-                                It is mandatory for replace actions. Regex capture groups are available.
+                                targetLabel defines the label to which the resulting string is written in a replacement.
+
+                                It is mandatory for `Replace`, `HashMod`, `Lowercase`, `Uppercase`,
+                                `KeepEqual` and `DropEqual` actions.
+
+                                Regex capture groups are available.
                               type: string
                           type: object
                         type: array
                     type: object
                   mcac:
+                    description: DEPRECATED MCAC has been deprecated in favor of the
+                      new metrics endpoint
                     properties:
                       enabled:
                         description: |-
                           enabled sets whether MCAC (legacy metrics endpoint) is enabled.
-                          This is considered true by default.
+                          This is considered false by default.
                         type: boolean
                       metricFilters:
                         description: |-
@@ -3728,15 +3839,19 @@ spec:
                               type: object
                             type: array
                         type: object
+                      config:
+                        description: |-
+                          Config is raw TOML merged into the generated Vector configuration.
+                          This can be used to set global Vector options or anything that does not fit the components model.
+                        type: string
                       enabled:
                         description: |-
                           Enabled enables the Vector agent for this resource (Cassandra, Reaper or Stargate).
                           Enabling the vector agent will inject a sidecar container into the pod.
                         type: boolean
                       image:
-                        description: |-
-                          Image is the name of the Vector image to use. If not set, the default image will be used.
-                          kube:default="timberio/vector:0.26.0-alpine"
+                        description: Image is the name of the Vector image to use.
+                          If not set, the default image will be used.
                         type: string
                       resources:
                         description: Resources is the resource requirements for the
@@ -3747,7 +3862,7 @@ spec:
                               Claims lists the names of resources, defined in spec.resourceClaims,
                               that are used by this container.
 
-                              This is an alpha field and requires enabling the
+                              This field depends on the
                               DynamicResourceAllocation feature gate.
 
                               This field is immutable. It can only be set for containers.
@@ -3829,9 +3944,10 @@ spec:
                     operator:
                       description: |-
                         Operator represents a key's relationship to the value.
-                        Valid operators are Exists and Equal. Defaults to Equal.
+                        Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
                         Exists is equivalent to wildcard for value, so that a pod can
                         tolerate all taints of a particular category.
+                        Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
                       type: string
                     tolerationSeconds:
                       description: |-

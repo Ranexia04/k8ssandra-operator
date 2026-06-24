@@ -16,7 +16,6 @@ import (
 	"github.com/k8ssandra/k8ssandra-operator/pkg/encryption"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/images"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/meta"
-	"github.com/k8ssandra/k8ssandra-operator/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -42,10 +41,11 @@ func TestNewDeployment(t *testing.T) {
 		}},
 	}
 	reaper.Spec.ResourceMeta = &meta.ResourceMeta{
-		CommonLabels: map[string]string{"common": "everywhere", "override": "commonLevel"},
+		CommonLabels:      map[string]string{"common": "everywhere", "override": "commonLevel"},
+		CommonAnnotations: map[string]string{"common-annotation": "common-value", "annotation-override": "commonLevel"},
 		Pods: meta.Tags{
 			Labels:      map[string]string{"pod-label": "pod-label-value", "override": "podLevel"},
-			Annotations: map[string]string{"pod-annotation": "pod-annotation-value"},
+			Annotations: map[string]string{"pod-annotation": "pod-annotation-value", "annotation-override": "podLevel"},
 		},
 		Service: meta.Tags{
 			Labels:      map[string]string{"service-label": "service-label-value"},
@@ -54,7 +54,6 @@ func TestNewDeployment(t *testing.T) {
 	}
 
 	labels := createServiceAndDeploymentLabels(reaper)
-	podLabels := utils.MergeMap(labels, reaper.Spec.ResourceMeta.Pods.Labels)
 	logger := testlogr.NewTestLogger(t)
 	deployment := NewDeployment(reaper, newTestDatacenter(), ptr.To("keystore-password"), ptr.To("truststore-password"), logger, getTestImageRegistry(t))
 
@@ -78,8 +77,26 @@ func TestNewDeployment(t *testing.T) {
 		},
 	})
 
-	assert.Equal(t, podLabels, deployment.Spec.Template.Labels)
-	assert.Equal(t, reaper.Spec.ResourceMeta.Pods.Annotations, deployment.Spec.Template.Annotations)
+	// Verify labels and annotations are there. PodLevel is always overriding the common ones
+	assert.Contains(t, deployment.Spec.Template.Labels, "pod-label")
+	assert.Equal(t, "pod-label-value", deployment.Spec.Template.Labels["pod-label"])
+	assert.Contains(t, deployment.Spec.Template.Labels, "common")
+	assert.Equal(t, "everywhere", deployment.Spec.Template.Labels["common"])
+
+	assert.Contains(t, deployment.Spec.Template.Labels, "override")
+	assert.Equal(t, "podLevel", deployment.Spec.Template.Labels["override"])
+
+	assert.Contains(t, deployment.Annotations, "common-annotation")
+	assert.Equal(t, "common-value", deployment.Annotations["common-annotation"])
+	assert.Contains(t, deployment.Annotations, k8ssandraapi.ResourceHashAnnotation)
+	assert.NotEmpty(t, deployment.Annotations[k8ssandraapi.ResourceHashAnnotation])
+
+	assert.Contains(t, deployment.Spec.Template.Annotations, "pod-annotation")
+	assert.Equal(t, "pod-annotation-value", deployment.Spec.Template.Annotations["pod-annotation"])
+	assert.Contains(t, deployment.Spec.Template.Annotations, "common-annotation")
+	assert.Equal(t, "common-value", deployment.Spec.Template.Annotations["common-annotation"])
+	assert.Contains(t, deployment.Spec.Template.Annotations, "annotation-override")
+	assert.Equal(t, "podLevel", deployment.Spec.Template.Annotations["annotation-override"])
 
 	podSpec := deployment.Spec.Template.Spec
 	assert.Len(t, podSpec.Containers, 1)
@@ -367,7 +384,6 @@ func TestNewStatefulSetForControlPlane(t *testing.T) {
 			Value: "true",
 		},
 	})
-
 }
 
 func TestHttpManagementConfiguration(t *testing.T) {
@@ -639,21 +655,22 @@ func TestDeploymentTypes(t *testing.T) {
 
 	// reaper with cassandra backend becomes a deployment
 	reaper := newTestReaper()
-	reaper.Spec.ReaperTemplate.StorageType = reaperapi.StorageTypeCassandra
+	reaper.Spec.StorageType = reaperapi.StorageTypeCassandra
 	deployment := NewDeployment(reaper, newTestDatacenter(), nil, nil, logger, getTestImageRegistry(t))
 	assert.Len(t, deployment.Spec.Template.Spec.Containers, 1)
+	assert.Len(t, deployment.Spec.Template.Spec.InitContainers, 1)
 	assert.Equal(t, reaperapi.StorageTypeCassandra, deployment.Spec.Template.Spec.Containers[0].Env[0].Value)
 
 	// asking for a deployment with memory backend does not work
 	reaper = newTestReaper()
-	reaper.Spec.ReaperTemplate.StorageType = reaperapi.StorageTypeLocal
+	reaper.Spec.StorageType = reaperapi.StorageTypeLocal
 	deployment = NewDeployment(reaper, newTestDatacenter(), nil, nil, logger, getTestImageRegistry(t))
 	assert.Nil(t, deployment)
 
 	// reaper with memory backend becomes a stateful set
 	reaper = newTestReaper()
-	reaper.Spec.ReaperTemplate.StorageType = reaperapi.StorageTypeLocal
-	reaper.Spec.ReaperTemplate.StorageConfig = &corev1.PersistentVolumeClaimSpec{
+	reaper.Spec.StorageType = reaperapi.StorageTypeLocal
+	reaper.Spec.StorageConfig = &corev1.PersistentVolumeClaimSpec{
 		StorageClassName: func() *string { s := "test"; return &s }(),
 		AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 		Resources: corev1.VolumeResourceRequirements{
@@ -664,11 +681,12 @@ func TestDeploymentTypes(t *testing.T) {
 	}
 	sts := NewStatefulSet(reaper, newTestDatacenter(), logger, getTestImageRegistry(t))
 	assert.Len(t, sts.Spec.Template.Spec.Containers, 1)
+	assert.Len(t, sts.Spec.Template.Spec.InitContainers, 1)
 	assert.Equal(t, "memory", sts.Spec.Template.Spec.Containers[0].Env[0].Value)
 
 	// asking for a stateful set with cassandra backend does not work
 	reaper = newTestReaper()
-	reaper.Spec.ReaperTemplate.StorageType = reaperapi.StorageTypeCassandra
+	reaper.Spec.StorageType = reaperapi.StorageTypeCassandra
 	sts = NewStatefulSet(reaper, newTestDatacenter(), logger, getTestImageRegistry(t))
 	assert.Nil(t, sts)
 }
@@ -787,7 +805,8 @@ func newTestReaper() *reaperapi.Reaper {
 				Keyspace:    "reaper_db",
 				StorageType: "cassandra",
 				ResourceMeta: &meta.ResourceMeta{
-					CommonLabels: map[string]string{"common": "everywhere", "override": "commonLevel"},
+					CommonLabels:      map[string]string{"common": "everywhere", "override": "commonLevel"},
+					CommonAnnotations: map[string]string{"common-annotation": "common-annotation-value"},
 					Pods: meta.Tags{
 						Labels:      map[string]string{"pod-label": "pod-label-value", "override": "podLevel"},
 						Annotations: map[string]string{"pod-annotation": "pod-annotation-value"},
@@ -920,12 +939,22 @@ func TestLabelsAnnotations(t *testing.T) {
 		k8ssandraapi.ManagedByLabel: k8ssandraapi.NameLabelValue,
 		reaperapi.ReaperLabel:       reaper.Name,
 		"common":                    "everywhere",
-		"override":                  "podLevel",
+		"override":                  "podLevel", // Pod-level labels override CommonLabels
 		"pod-label":                 "pod-label-value",
 	}
 
 	assert.Equal(t, deploymentLabels, deployment.Labels)
 	assert.Equal(t, podLabels, deployment.Spec.Template.Labels)
+
+	assert.Contains(t, deployment.Annotations, "common-annotation")
+	assert.Equal(t, "common-annotation-value", deployment.Annotations["common-annotation"])
+	assert.Contains(t, deployment.Annotations, k8ssandraapi.ResourceHashAnnotation)
+	assert.NotEmpty(t, deployment.Annotations[k8ssandraapi.ResourceHashAnnotation])
+
+	assert.Contains(t, deployment.Spec.Template.Annotations, "pod-annotation")
+	assert.Equal(t, "pod-annotation-value", deployment.Spec.Template.Annotations["pod-annotation"])
+	assert.Contains(t, deployment.Spec.Template.Annotations, "common-annotation")
+	assert.Equal(t, "common-annotation-value", deployment.Spec.Template.Annotations["common-annotation"])
 }
 
 func TestGetAdaptiveIncremental(t *testing.T) {
@@ -991,6 +1020,91 @@ func TestComputeEnvVarsAdditionalEnvVars(t *testing.T) {
 		}
 	}
 	assert.True(t, found)
+}
+func TestComputeEnvVarsEncryption(t *testing.T) {
+	tests := []struct {
+		name               string
+		serverCertName     string
+		clientCertName     string
+		expectedEnvVars    map[string]string
+		notExpectedEnvVars []string
+	}{
+		{
+			name:            "no encryption",
+			serverCertName:  "",
+			clientCertName:  "",
+			expectedEnvVars: map[string]string{},
+			notExpectedEnvVars: []string{
+				"REAPER_SERVER_TLS_ENABLE",
+				"REAPER_SERVER_TLS_KEYSTORE_PATH",
+				"REAPER_SERVER_TLS_TRUSTSTORE_PATH",
+				"REAPER_SERVER_TLS_CLIENT_AUTH",
+				"REAPER_SERVER_TLS_DISABLE_SNI",
+			},
+		},
+		{
+			name:           "server encryption only",
+			serverCertName: "server-cert",
+			clientCertName: "",
+			expectedEnvVars: map[string]string{
+				"REAPER_SERVER_TLS_ENABLE":          "true",
+				"REAPER_SERVER_TLS_KEYSTORE_PATH":   "/etc/encryption/server/keystore.jks",
+				"REAPER_SERVER_TLS_TRUSTSTORE_PATH": "/etc/encryption/server/truststore.jks",
+				"REAPER_SERVER_TLS_DISABLE_SNI":     "true",
+			},
+			notExpectedEnvVars: []string{
+				"REAPER_SERVER_TLS_CLIENT_AUTH",
+			},
+		},
+		{
+			name:           "mutual TLS encryption",
+			serverCertName: "server-cert",
+			clientCertName: "client-cert",
+			expectedEnvVars: map[string]string{
+				"REAPER_SERVER_TLS_ENABLE":          "true",
+				"REAPER_SERVER_TLS_KEYSTORE_PATH":   "/etc/encryption/server/keystore.jks",
+				"REAPER_SERVER_TLS_TRUSTSTORE_PATH": "/etc/encryption/server/truststore.jks",
+				"REAPER_SERVER_TLS_CLIENT_AUTH":     "true",
+				"REAPER_SERVER_TLS_DISABLE_SNI":     "true",
+			},
+			notExpectedEnvVars: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reaper := newTestReaper()
+			if tt.serverCertName != "" {
+				reaper.Spec.Encryption = &reaperapi.ReaperEncryption{
+					ServerCertName: tt.serverCertName,
+					ClientCertName: tt.clientCertName,
+				}
+			}
+			dc := newTestDatacenter()
+
+			envVars := computeEnvVars(reaper, dc, getTestImageRegistry(t))
+
+			// Check expected env vars are present with correct values
+			for expectedName, expectedValue := range tt.expectedEnvVars {
+				found := false
+				for _, env := range envVars {
+					if env.Name == expectedName {
+						assert.Equal(t, expectedValue, env.Value, "env var %s should have value %s", expectedName, expectedValue)
+						found = true
+						break
+					}
+				}
+				assert.True(t, found, "expected env var %s not found", expectedName)
+			}
+
+			// Check that not expected env vars are absent
+			for _, notExpectedName := range tt.notExpectedEnvVars {
+				for _, env := range envVars {
+					assert.NotEqual(t, notExpectedName, env.Name, "env var %s should not be present", notExpectedName)
+				}
+			}
+		})
+	}
 }
 
 func TestIsReaperPostV4(t *testing.T) {
@@ -1138,4 +1252,28 @@ func getTestImageRegistry(t testing.TB) cassimages.ImageRegistry {
 		imageRegistryTest = r
 	})
 	return imageRegistryTest
+}
+
+func TestPvcReclaimPolicy(t *testing.T) {
+	reaper := newTestReaper()
+	reaper.Spec.StorageType = reaperapi.StorageTypeLocal
+	reaper.Spec.StorageConfig = newTestStorageConfig()
+	logger := testlogr.NewTestLogger(t)
+
+	// Test that StatefulSet with local storage has PVC retention policy set
+	sts := NewStatefulSet(reaper, newTestDatacenter(), logger, getTestImageRegistry(t))
+	assert.NotNil(t, sts, "expected StatefulSet to be created")
+	assert.NotNil(t, sts.Spec.PersistentVolumeClaimRetentionPolicy, "expected PVC retention policy to be set")
+	assert.Equal(t, appsv1.DeletePersistentVolumeClaimRetentionPolicyType, sts.Spec.PersistentVolumeClaimRetentionPolicy.WhenDeleted, "expected WhenDeleted to be Delete")
+	assert.Equal(t, appsv1.DeletePersistentVolumeClaimRetentionPolicyType, sts.Spec.PersistentVolumeClaimRetentionPolicy.WhenScaled, "expected WhenScaled to be Delete")
+
+	// cannot have STS with something else than local storage
+
+	// Test that Deployment with Cassandra storage does not have PVC retention policy
+	reaper.Spec.StorageType = reaperapi.StorageTypeCassandra
+	reaper.Spec.StorageConfig = nil
+	deployment := NewDeployment(reaper, newTestDatacenter(), nil, nil, logger, getTestImageRegistry(t))
+	assert.NotNil(t, deployment, "expected Deployment to be created")
+	// Deployments don't have PersistentVolumeClaimRetentionPolicy field, so we just verify it's a Deployment
+	assert.IsType(t, &appsv1.Deployment{}, deployment)
 }

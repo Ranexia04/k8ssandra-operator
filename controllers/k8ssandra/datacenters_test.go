@@ -149,6 +149,9 @@ func TestGetSourceDatacenterName_Found(t *testing.T) {
 	kc := &api.K8ssandraCluster{
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -210,13 +213,14 @@ func TestGetSourceDatacenterName_Conflict(t *testing.T) {
 	}
 
 	kc := &api.K8ssandraCluster{
-		ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{
-				api.RebuildSourceDcAnnotation: "dc2",
-			},
-		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					Rebuild: &api.Rebuild{
+						SourceDC: "dc2",
+					},
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -262,7 +266,6 @@ func TestGetSourceDatacenterName_Conflict(t *testing.T) {
 	if err == nil {
 		t.Errorf("An error was expected as src dc and target dc should be different")
 	}
-
 }
 
 func TestAllowUpdate(t *testing.T) {

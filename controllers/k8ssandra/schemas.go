@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/go-logr/logr"
 	cassdcapi "github.com/k8ssandra/cass-operator/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/k8ssandra-operator/apis/k8ssandra/v1alpha1"
+	reaperapi "github.com/k8ssandra/k8ssandra-operator/apis/reaper/v1alpha1"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/annotations"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/cassandra"
 	kerrors "github.com/k8ssandra/k8ssandra-operator/pkg/errors"
@@ -34,7 +36,6 @@ func (r *K8ssandraClusterReconciler) checkSchemas(
 	dc *cassdcapi.CassandraDatacenter,
 	remoteClient client.Client,
 	logger logr.Logger) result.ReconcileResult {
-
 	mgmtApi, err := r.ManagementApi.NewManagementApiFacade(ctx, dc, remoteClient, logger)
 	if err != nil {
 		return result.Error(err)
@@ -51,8 +52,11 @@ func (r *K8ssandraClusterReconciler) checkSchemas(
 	// we only want to reconcile the Reaper schema if we're deploying Reaper together with k8ssandra cluster
 	// otherwise we just register the k8ssandra cluster with an external reaper (happens after reconciling the DCs)
 	if kc.Spec.Reaper != nil && !kc.Spec.Reaper.HasReaperRef() {
-		if recResult := r.reconcileReaperSchema(ctx, kc, mgmtApi, logger); recResult.Completed() {
-			return recResult
+		// and even in this case, we only want to do this if the cluster itself is going to be used for reaper's storage
+		if kc.Spec.Reaper.StorageType == reaperapi.StorageTypeCassandra {
+			if recResult := r.reconcileReaperSchema(ctx, kc, mgmtApi, logger); recResult.Completed() {
+				return recResult
+			}
 		}
 	}
 
@@ -79,7 +83,7 @@ func (r *K8ssandraClusterReconciler) checkSchemas(
 			}
 		}
 
-		dc, _, err = r.findDcForDeletion(ctx, kcKey, decommCassDcName, dcRemoteClient)
+		dc, err = r.findDcForDeletion(ctx, kcKey, decommCassDcName, dcRemoteClient)
 		if err != nil {
 			return result.Error(err)
 		}
@@ -112,7 +116,6 @@ func (r *K8ssandraClusterReconciler) checkInitialSystemReplication(
 	ctx context.Context,
 	kc *api.K8ssandraCluster,
 	logger logr.Logger) (cassandra.SystemReplication, error) {
-
 	replication := make(map[string]int)
 	if val := annotations.GetAnnotation(kc, api.InitialSystemReplicationAnnotation); val != "" {
 		if err := json.Unmarshal([]byte(val), &replication); err == nil {
@@ -167,9 +170,22 @@ func (r *K8ssandraClusterReconciler) updateReplicationOfSystemKeyspaces(
 	kc *api.K8ssandraCluster,
 	mgmtApi cassandra.ManagementApiFacade,
 	logger logr.Logger) result.ReconcileResult {
-
 	if recResult := r.versionCheck(ctx, kc); recResult.Completed() {
 		return recResult
+	}
+
+	if kc.Spec.Cassandra.ServerType == api.ServerDistributionCassandra {
+		versionString := kc.Spec.Cassandra.ServerVersion
+		version, err := semver.NewVersion(versionString)
+		if err == nil {
+			if version.GreaterThanEqual(semver.MustParse("4.0.0")) && len(kc.Status.Datacenters) > len(kc.Spec.Cassandra.Datacenters) {
+				// A DC is being decommissioned and Cassandra 4.1+ will require to keep system_auth replicas until the DC is gone.
+				return result.Continue()
+			}
+		} else {
+			logger.Error(err, "Failed to parse version", "version", versionString)
+			return result.Error(err)
+		}
 	}
 
 	replication := cassandra.ComputeReplicationFromDatacenters(3, kc.Spec.ExternalDatacenters, kc.GetInitializedDatacenters()...)
@@ -208,7 +224,6 @@ func (r *K8ssandraClusterReconciler) updateUserKeyspacesReplication(
 	dc *cassdcapi.CassandraDatacenter,
 	mgmtApi cassandra.ManagementApiFacade,
 	logger logr.Logger) result.ReconcileResult {
-
 	jsonReplication := annotations.GetAnnotation(kc, api.DcReplicationAnnotation)
 	if jsonReplication == "" {
 		logger.Info(api.DcReplicationAnnotation + " not set. Replication for user keyspaces will not be updated")
@@ -274,7 +289,6 @@ func (r *K8ssandraClusterReconciler) checkUserKeyspacesReplicationForDecommissio
 	decommDc string,
 	mgmtApi cassandra.ManagementApiFacade,
 	logger logr.Logger) result.ReconcileResult {
-
 	logger.Info("Updating replication for user keyspaces for decommission")
 
 	userKeyspaces, err := getUserKeyspaces(mgmtApi, kc)

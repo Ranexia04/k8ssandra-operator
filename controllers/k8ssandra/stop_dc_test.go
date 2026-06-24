@@ -45,7 +45,6 @@ func stopDcTest(f *framework.Framework, ctx context.Context, test stopDcTestFunc
 }
 
 func stopDcTestSetup(t *testing.T, f *framework.Framework, ctx context.Context, namespace string) *api.K8ssandraCluster {
-
 	kc := &api.K8ssandraCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:   namespace,
@@ -55,7 +54,7 @@ func stopDcTestSetup(t *testing.T, f *framework.Framework, ctx context.Context, 
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
 				DatacenterOptions: api.DatacenterOptions{
-					ServerVersion: "4.0.1",
+					ServerVersion: "4.0.18",
 					StorageConfig: &cassdcapi.StorageConfig{
 						CassandraDataVolumeClaimSpec: &corev1.PersistentVolumeClaimSpec{StorageClassName: &defaultStorageClass},
 					},
@@ -99,7 +98,7 @@ func stopDcTestSetup(t *testing.T, f *framework.Framework, ctx context.Context, 
 	require.NoError(t, err, "failed to set dc2 status ready")
 
 	t.Log("check that dc2 was rebuilt")
-	verifyRebuildTaskCreated(ctx, t, f, dc2Key, dc1Key)
+	verifyRebuildTaskCreated(ctx, t, f, dc2Key, dc1Key, kc)
 	rebuildTaskKey := framework.NewClusterKey(f.DataPlaneContexts[1], kc.Namespace, "dc2-rebuild")
 	setRebuildTaskFinished(ctx, t, f, rebuildTaskKey, dc2Key)
 
@@ -159,7 +158,6 @@ func stopDcManagementApiReset(replication map[string]int) {
 // expects dc1 to be in stopped state, and its Stargate and Reaper resources to be deleted. It expects dc2 to remain
 // deployed and ready at all times, along with its Stargate and Reaper resources.
 func stopExistingDc(t *testing.T, f *framework.Framework, ctx context.Context, kc *api.K8ssandraCluster) {
-
 	kcKey := utils.GetKey(kc)
 	dc1Key := framework.NewClusterKey(f.DataPlaneContexts[0], kc.Namespace, "dc1")
 	reaper1Key := framework.NewClusterKey(f.DataPlaneContexts[0], kc.Namespace, kc.Name+"-dc1-reaper")
@@ -228,7 +226,6 @@ func stopExistingDc(t *testing.T, f *framework.Framework, ctx context.Context, k
 }
 
 func addAndStopDc(t *testing.T, f *framework.Framework, ctx context.Context, kc *api.K8ssandraCluster) {
-
 	kcKey := utils.GetKey(kc)
 	dc1Key := framework.NewClusterKey(f.DataPlaneContexts[0], kc.Namespace, "dc1")
 	dc3Key := framework.NewClusterKey(f.DataPlaneContexts[2], kc.Namespace, "dc3")
@@ -256,7 +253,7 @@ func addAndStopDc(t *testing.T, f *framework.Framework, ctx context.Context, kc 
 	require.NoError(t, err, "failed to set dc3 status ready")
 
 	t.Log("check that dc3 was rebuilt")
-	verifyRebuildTaskCreated(ctx, t, f, dc3Key, dc1Key)
+	verifyRebuildTaskCreated(ctx, t, f, dc3Key, dc1Key, kc)
 	rebuildTaskKey := framework.NewClusterKey(f.DataPlaneContexts[2], kc.Namespace, "dc3-rebuild")
 	setRebuildTaskFinished(ctx, t, f, rebuildTaskKey, dc3Key)
 
@@ -343,7 +340,7 @@ func addAndStopDc(t *testing.T, f *framework.Framework, ctx context.Context, kc 
 	require.Eventually(t, f.ReaperExists(ctx, reaper2Key), timeout, interval, "failed to verify reaper reaper2 created")
 
 	t.Log("check that dc3 was rebuilt")
-	verifyRebuildTaskCreated(ctx, t, f, dc3Key, dc1Key)
+	verifyRebuildTaskCreated(ctx, t, f, dc3Key, dc1Key, kc)
 	rebuildTaskKey = framework.NewClusterKey(f.DataPlaneContexts[2], kc.Namespace, "dc3-rebuild")
 	setRebuildTaskFinished(ctx, t, f, rebuildTaskKey, dc3Key)
 

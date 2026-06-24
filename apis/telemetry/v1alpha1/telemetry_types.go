@@ -33,7 +33,6 @@ type VectorSpec struct {
 
 	// Image is the name of the Vector image to use. If not set, the default image will be used.
 	// +optional
-	// kube:default="timberio/vector:0.26.0-alpine"
 	Image string `json:"image,omitempty"`
 
 	// ScrapeInterval is the interval at which the Vector agent will scrape the metrics endpoint.
@@ -41,6 +40,11 @@ type VectorSpec struct {
 	// +optional
 	// kube:default=30s
 	ScrapeInterval *metav1.Duration `json:"scrapeInterval,omitempty"`
+
+	// Config is raw TOML merged into the generated Vector configuration.
+	// This can be used to set global Vector options or anything that does not fit the components model.
+	// +optional
+	Config string `json:"config,omitempty"`
 
 	Components *VectorComponentsSpec `json:"components,omitempty"`
 }
@@ -103,6 +107,7 @@ type VectorTransformSpec struct {
 	Config string `json:"config,omitempty"`
 }
 
+// DEPRECATED MCAC has been deprecated in favor of the new metrics endpoint
 type McacTelemetrySpec struct {
 	// MetricFilters allows passing filters to MCAC in order to reduce the amount of extracted metrics.
 	// Not setting this field will result in the default filters being used:
@@ -125,7 +130,7 @@ type McacTelemetrySpec struct {
 	MetricFilters *[]string `json:"metricFilters,omitempty"`
 
 	// enabled sets whether MCAC (legacy metrics endpoint) is enabled.
-	// This is considered true by default.
+	// This is considered false by default.
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
@@ -135,6 +140,13 @@ type CassandraAgentSpec struct {
 }
 
 type Endpoint struct {
-	Address string `json:"address,omitempty"`
-	Port    string `json:"port,omitempty"`
+	Address string     `json:"address,omitempty"`
+	Port    string     `json:"port,omitempty"`
+	TLS     *TLSConfig `json:"tls,omitempty"`
+}
+
+type TLSConfig struct {
+	CAFile   string `json:"ca.crt,omitempty"`
+	CertFile string `json:"tls.crt,omitempty"`
+	KeyFile  string `json:"tls.key,omitempty"`
 }

@@ -36,6 +36,9 @@ func testMedusaIniFull(t *testing.T) {
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -71,6 +74,10 @@ func testMedusaIniFull(t *testing.T) {
 				},
 				ServiceProperties: medusaapi.Service{
 					GrpcPort: 55055,
+					Encryption: &medusaapi.GRPCEncryption{
+						ServerSecretName: "mgmt-api-server-certs",
+						ClientSecretName: "mgmt-api-client-certs",
+					},
 				},
 				CassandraUserSecretRef: corev1.LocalObjectReference{
 					Name: "test-superuser",
@@ -97,6 +104,9 @@ func testMedusaIniFull(t *testing.T) {
 	assert.Contains(t, medusaIni, "secure = False")
 	assert.Contains(t, medusaIni, "backup_grace_period_in_days = 7")
 	assert.Contains(t, medusaIni, "port = 55055")
+	assert.Contains(t, medusaIni, "ca_cert = /etc/certificates/grpc-server-certs/ca.crt")
+	assert.Contains(t, medusaIni, "tls_cert = /etc/certificates/grpc-server-certs/tls.crt")
+	assert.Contains(t, medusaIni, "tls_key = /etc/certificates/grpc-server-certs/tls.key")
 }
 
 func testMedusaIniNoPrefix(t *testing.T) {
@@ -107,6 +117,9 @@ func testMedusaIniNoPrefix(t *testing.T) {
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -174,6 +187,9 @@ func testMedusaIniZeroConcurrentTransfers(t *testing.T) {
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -242,6 +258,7 @@ func testMedusaIniSecured(t *testing.T) {
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
 				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
 					ManagementApiAuth: &cassdcapi.ManagementApiAuthConfig{
 						Manual: &cassdcapi.ManagementApiAuthManualConfig{
 							ClientSecretName: "test-client-secret",
@@ -323,6 +340,9 @@ func testMedusaIniSecuredDcLevelSetting(t *testing.T) {
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -386,6 +406,9 @@ func testMedusaIniUnsecured(t *testing.T) {
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -453,6 +476,9 @@ func testMedusaIniMissingOptionalSettings(t *testing.T) {
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "3.11.14",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						Meta: api.EmbeddedObjectMeta{
@@ -626,7 +652,6 @@ func TestInitContainerCustomResources(t *testing.T) {
 	assert.Equal(t, resource.MustParse("30"), *dcConfig.PodTemplateSpec.Spec.Containers[0].Resources.Requests.Cpu(), "expected main container cpu request to be set")
 	assert.Equal(t, resource.MustParse("40Gi"), *dcConfig.PodTemplateSpec.Spec.Containers[0].Resources.Limits.Memory(), "expected main container memory limit to be set")
 	assert.Equal(t, resource.MustParse("40"), *dcConfig.PodTemplateSpec.Spec.Containers[0].Resources.Limits.Cpu(), "expected main container cpu limit to be set")
-
 }
 
 func TestExternalSecretsFlag(t *testing.T) {
@@ -675,7 +700,7 @@ func TestGenerateMedusaProbe(t *testing.T) {
 		FailureThreshold:    500,
 	}
 
-	customProbe, err := generateMedusaProbe(customProbeSettings, 55055)
+	customProbe, err := generateMedusaProbe(customProbeSettings, 55055, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(100), customProbe.InitialDelaySeconds)
 	assert.Equal(t, int32(200), customProbe.TimeoutSeconds)
@@ -684,7 +709,7 @@ func TestGenerateMedusaProbe(t *testing.T) {
 	assert.Equal(t, int32(500), customProbe.FailureThreshold)
 	assert.Contains(t, customProbe.Exec.Command[1], "55055")
 
-	defaultProbe, err := generateMedusaProbe(nil, 55155)
+	defaultProbe, err := generateMedusaProbe(nil, 55155, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, int32(DefaultProbeInitialDelay), defaultProbe.InitialDelaySeconds)
 	assert.Equal(t, int32(DefaultProbeTimeout), defaultProbe.TimeoutSeconds)
@@ -706,9 +731,23 @@ func TestGenerateMedusaProbe(t *testing.T) {
 			},
 		},
 	}
-	probe, err := generateMedusaProbe(rejectedProbe, 55055)
+	probe, err := generateMedusaProbe(rejectedProbe, 55055, nil)
 	assert.Error(t, err)
 	assert.Nil(t, probe)
+
+	// Test that TLS flags are added when encryption is configured
+	encryption := &medusaapi.GRPCEncryption{
+		ClientSecretName: "medusa-client-cert",
+		ServerSecretName: "medusa-server-cert",
+	}
+	tlsProbe, err := generateMedusaProbe(nil, 55255, encryption)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(DefaultProbeInitialDelay), tlsProbe.InitialDelaySeconds)
+	assert.Contains(t, tlsProbe.Exec.Command[1], "55255")
+	assert.Contains(t, tlsProbe.Exec.Command, "--tls")
+	assert.Contains(t, tlsProbe.Exec.Command, "--tls-ca-cert=/etc/certificates/grpc-server-certs/ca.crt")
+	assert.Contains(t, tlsProbe.Exec.Command, "--tls-client-cert=/etc/certificates/grpc-server-certs/tls.crt")
+	assert.Contains(t, tlsProbe.Exec.Command, "--tls-client-key=/etc/certificates/grpc-server-certs/tls.key")
 }
 
 var (

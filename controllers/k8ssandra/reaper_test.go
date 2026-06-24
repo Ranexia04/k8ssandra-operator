@@ -130,7 +130,7 @@ func createMultiDcClusterWithReaper(t *testing.T, ctx context.Context, f *framew
 	require.NoError(err, "failed to update dc2 status to ready")
 
 	t.Log("check that dc2 was rebuilt")
-	verifyRebuildTaskCreated(ctx, t, f, dc2Key, dc1Key)
+	verifyRebuildTaskCreated(ctx, t, f, dc2Key, dc1Key, kc)
 	rebuildTaskKey := framework.NewClusterKey(f.DataPlaneContexts[1], kc.Namespace, "dc2-rebuild")
 	setRebuildTaskFinished(ctx, t, f, rebuildTaskKey, dc2Key)
 
@@ -233,7 +233,6 @@ func createMultiDcClusterWithReaper(t *testing.T, ctx context.Context, f *framew
 		return kc.Status.Datacenters[dc1Key.Name].Reaper == nil &&
 			kc.Status.Datacenters[dc2Key.Name].Reaper == nil
 	}, timeout, interval)
-
 }
 
 func createMultiDcClusterWithControlPlaneReaper(t *testing.T, ctx context.Context, f *framework.Framework, namespace string) {
@@ -335,6 +334,9 @@ func verifyReaperSecretAnnotationAdded(t *testing.T, f *framework.Framework, ctx
 
 func newTwoDcCassandraClusterTemplate(f *framework.Framework) *api.CassandraClusterTemplate {
 	return &api.CassandraClusterTemplate{
+		DatacenterOptions: api.DatacenterOptions{
+			ServerVersion: "3.11.14",
+		},
 		Datacenters: []api.CassandraDatacenterTemplate{
 			{
 				Meta: api.EmbeddedObjectMeta{

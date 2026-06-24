@@ -20,14 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 
 	"k8s.io/utils/ptr"
 
 	"github.com/go-logr/logr"
 	cassimages "github.com/k8ssandra/cass-operator/pkg/images"
-	"github.com/k8ssandra/k8ssandra-operator/pkg/shared"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -76,7 +74,7 @@ type MedusaRestoreJobReconciler struct {
 func (r *MedusaRestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("medusarestorejob", req.NamespacedName)
 	factory := medusa.NewFactory(r.Client, logger)
-	logger.Info("Starting reconcile", "MedusaRestoreJob", req.NamespacedName.Name)
+	logger.Info("Starting reconcile", "MedusaRestoreJob", req.Name)
 	request, result, err := factory.NewMedusaRestoreRequest(ctx, req.NamespacedName)
 
 	if result != nil {
@@ -117,7 +115,7 @@ func (r *MedusaRestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		request.RestoreJob.Status.FinishTime = metav1.Now()
 		request.RestoreJob.Status.Message = err.Error()
 		if err = r.Status().Update(ctx, request.RestoreJob); err != nil {
-			logger.Error(err, "failed to update MedusaRestoreJob with error message", "MedusaRestoreJob", req.NamespacedName.Name)
+			logger.Error(err, "failed to update MedusaRestoreJob with error message", "MedusaRestoreJob", req.Name)
 			return ctrl.Result{}, err
 		}
 
@@ -232,7 +230,7 @@ func (r *MedusaRestoreJobReconciler) applyUpdatesAndRequeue(ctx context.Context,
 // with the restore container, have been pushed down to the StatefulSets. Return true if
 // the changes have been applied.
 func (r *MedusaRestoreJobReconciler) podTemplateSpecUpdateComplete(ctx context.Context, req *medusa.RestoreRequest) (bool, error) {
-	if updated := cassandra.DatacenterUpdatedAfter(req.RestoreJob.Status.DatacenterStopped.Time.Add(-1*time.Second), req.Datacenter); !updated {
+	if updated := cassandra.DatacenterUpdatedAfter(req.RestoreJob.Status.DatacenterStopped.Add(-1*time.Second), req.Datacenter); !updated {
 		return false, nil
 	}
 
@@ -256,7 +254,7 @@ func (r *MedusaRestoreJobReconciler) podTemplateSpecUpdateComplete(ctx context.C
 			return false, nil
 		}
 
-		if !utils.ContainerHasEnvVar(container, backupNameEnvVar, req.MedusaBackup.ObjectMeta.Name) {
+		if !utils.ContainerHasEnvVar(container, backupNameEnvVar, req.MedusaBackup.Name) {
 			return false, nil
 		}
 
@@ -278,14 +276,8 @@ func (r *MedusaRestoreJobReconciler) prepareRestore(ctx context.Context, request
 	}
 
 	for _, pod := range pods {
-		medusaPort := shared.BackupSidecarPort
-		explicitPort, found := cassandra.FindContainerPort(ptr.To(pod), "medusa", "grpc")
-		if found {
-			medusaPort = explicitPort
-		}
-		addr := net.JoinHostPort(pod.Status.PodIP, fmt.Sprint(medusaPort))
-		if medusaClient, err := r.ClientFactory.NewClient(addr); err != nil {
-			logger.Error(err, "Failed to create Medusa client", "address", addr)
+		if medusaClient, err := newClient(ctx, r.Client, request.Datacenter, ptr.To(pod), r.ClientFactory); err != nil {
+			logger.Error(err, "Failed to create Medusa client", "Pod", pod.Name)
 		} else {
 			restoreHostMap, err := medusa.GetHostMap(request.Datacenter, *request.RestoreJob, medusaClient, ctx)
 			if err != nil {
@@ -380,7 +372,7 @@ func stopDatacenterRestoreJob(req *medusa.RestoreRequest) bool {
 // updateRestoreInitContainer sets the backup name, restore key and restore mapping env vars in the medusa-restore
 // init container. An error is returned if the container is not found.
 func updateMedusaRestoreInitContainer(req *medusa.RestoreRequest) error {
-	if err := setBackupNameInRestoreContainer(req.MedusaBackup.ObjectMeta.Name, req.Datacenter); err != nil {
+	if err := setBackupNameInRestoreContainer(req.MedusaBackup.Name, req.Datacenter); err != nil {
 		return err
 	}
 

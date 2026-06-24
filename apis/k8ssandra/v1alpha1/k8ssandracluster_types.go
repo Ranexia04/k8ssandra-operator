@@ -81,7 +81,7 @@ type K8ssandraClusterSpec struct {
 }
 
 // IsAuthEnabled returns true if auth is not specified by the user (auth by default)
-// or if the user has explicilty set Auth to true in the cluster spec
+// or if the user has explicitly set Auth to true in the cluster spec
 func (in K8ssandraClusterSpec) IsAuthEnabled() bool {
 	return in.Auth == nil || *in.Auth
 }
@@ -207,6 +207,7 @@ func (in *K8ssandraCluster) GetInitializedDatacenters() []CassandraDatacenterTem
 			}
 		}
 	}
+
 	return datacenters
 }
 
@@ -319,6 +320,22 @@ func (in *CassandraDatacenterTemplate) CassDcName() string {
 		return in.DatacenterName
 	}
 	return in.Meta.Name
+}
+
+// MergeTelemetry returns the cluster-level Cassandra telemetry settings merged with the
+// datacenter-level settings with datacenter values taking precedence.
+func (in *CassandraDatacenterTemplate) MergeTelemetry(clusterTemplate *CassandraClusterTemplate) *telemetryapi.TelemetrySpec {
+	var clusterTelemetry *telemetryapi.TelemetrySpec
+	if clusterTemplate != nil {
+		clusterTelemetry = clusterTemplate.Telemetry
+	}
+
+	var dcTelemetry *telemetryapi.TelemetrySpec
+	if in != nil {
+		dcTelemetry = in.Telemetry
+	}
+
+	return dcTelemetry.MergeWith(clusterTelemetry)
 }
 
 // DatacenterOptions are configuration settings that are can be set at the Cluster level and overridden for a single DC
@@ -452,6 +469,10 @@ type DatacenterOptions struct {
 	// ReadOnlyRootFilesystem makes the cassandra container to be run with a read-only root filesystem. Currently only functional when used with the
 	// new k8ssandra-client config builder (Cassandra 4.1 and newer and HCD)
 	ReadOnlyRootFilesystem *bool `json:"readOnlyRootFilesystem,omitempty"`
+
+	// Rebuild configures datacenter rebuild operations when adding a new DC to an existing cluster.
+	// +optional
+	Rebuild *Rebuild `json:"rebuild,omitempty"`
 }
 
 // NetworkingConfig is a copy of cass-operator's NetworkingConfig struct. It is copied here to
@@ -484,6 +505,22 @@ type K8ssandraVolumes struct {
 	// Such volumes are automatically mounted by cass-operator into the cassandra containers.
 	// +optional
 	PVCs []cassdcapi.AdditionalVolumes `json:"pvcs,omitempty"`
+}
+
+type Rebuild struct {
+	// SourceDC tells the operation the DC from which to stream when rebuilding a DC. If not set the operator will choose the first DC. The value for
+	// this field must specify the name of a CassandraDatacenter whose Ready condition is true.
+	// +optional
+	SourceDC string `json:"sourceDc,omitempty"`
+
+	// MaxConcurrentRebuilds specifies the maximum number of pods to rebuild
+	// concurrently per rack during datacenter rebuild operations.
+	// Defaults to 1 if not set.
+	// If set to a positive value, at most that many pods per rack will be rebuilt in parallel.
+	// If set to 0, all pods in the rack will be rebuilt in parallel.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxConcurrentRebuilds *int `json:"maxConcurrentRebuilds,omitempty"`
 }
 
 type EmbeddedObjectMeta struct {
@@ -590,7 +627,6 @@ func DcAdded(oldSpec K8ssandraClusterSpec, newSpec K8ssandraClusterSpec) bool {
 		}
 	}
 	return wasAdded
-
 }
 
 func DcRemoved(oldSpec K8ssandraClusterSpec, newSpec K8ssandraClusterSpec) bool {

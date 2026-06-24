@@ -44,10 +44,9 @@ import (
 )
 
 const (
-	clustersToCreate          = 3
 	clusterProtoName          = "cluster-%d-%s"
-	cassOperatorVersion       = "v1.28.0"
-	prometheusOperatorVersion = "v0.9.0"
+	cassOperatorVersion       = "v1.31.0"
+	prometheusOperatorVersion = "v0.17.0"
 )
 
 type TestEnv struct {
@@ -78,7 +77,7 @@ func (e *TestEnv) Start(ctx context.Context, t *testing.T, initReconcilers func(
 		return err
 	}
 
-	webhookInstallOptions := &e.Environment.WebhookInstallOptions
+	webhookInstallOptions := &e.WebhookInstallOptions
 	whServer := webhook.NewServer(webhook.Options{
 		Port:    webhookInstallOptions.LocalServingPort,
 		Host:    webhookInstallOptions.LocalServingHost,
@@ -180,7 +179,6 @@ type MultiClusterTestEnv struct {
 }
 
 func (e *MultiClusterTestEnv) Start(ctx context.Context, t *testing.T, controlPlaneReconcilers func(mgr manager.Manager, clientCache *clientcache.ClientCache, clusters []cluster.Cluster) error, dataPlaneReconcilers func(mgr manager.Manager, clientCache *clientcache.ClientCache, clusters []cluster.Cluster) error) error {
-
 	// if err := prepareCRDs(); err != nil {
 	// 	t.Fatalf("failed to prepare CRDs: %s", err)
 	// }
@@ -430,7 +428,6 @@ func prepareCRDs() error {
 	}
 	promOperatorCrdPath := filepath.Join(promOperatorTargetDir, "crd.yaml")
 	return os.WriteFile(promOperatorCrdPath, buf.Bytes(), 0644)
-
 }
 
 func registerApis() error {

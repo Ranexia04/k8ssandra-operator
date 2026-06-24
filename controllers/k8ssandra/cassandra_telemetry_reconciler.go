@@ -9,7 +9,6 @@ import (
 	"github.com/go-logr/logr"
 	cassdcapi "github.com/k8ssandra/cass-operator/apis/cassandra/v1beta1"
 	k8ssandraapi "github.com/k8ssandra/k8ssandra-operator/apis/k8ssandra/v1alpha1"
-	"github.com/k8ssandra/k8ssandra-operator/apis/telemetry/v1alpha1"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/result"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/telemetry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,17 +22,15 @@ func (r *K8ssandraClusterReconciler) reconcileCassandraDCTelemetry(
 	logger logr.Logger,
 	remoteClient client.Client,
 ) result.ReconcileResult {
-	logger.Info("reconciling telemetry")
+	logger.V(1).Info("reconciling telemetry")
 
-	mergedSpec := MergeTelemetrySpecs(kc, dcTemplate)
-	var commonLabels map[string]string
-	if mergedSpec == nil {
-		commonLabels = make(map[string]string)
-	} else if mergedSpec.Prometheus == nil {
-		commonLabels = make(map[string]string)
-	} else {
+	mergedSpec := dcTemplate.MergeTelemetry(kc.Spec.Cassandra)
+	commonLabels := make(map[string]string)
+
+	if mergedSpec != nil && mergedSpec.Prometheus != nil {
 		commonLabels = mergedSpec.Prometheus.CommonLabels
 	}
+
 	cfg := telemetry.PrometheusResourcer{
 		MonitoringTargetNS:   actualDc.Namespace,
 		MonitoringTargetName: actualDc.Name,
@@ -41,16 +38,20 @@ func (r *K8ssandraClusterReconciler) reconcileCassandraDCTelemetry(
 		Logger:               logger,
 		CommonLabels:         mustLabels(kc.Name, kc.Namespace, actualDc.LabelResourceName(), commonLabels),
 	}
-	logger.Info("merged TelemetrySpec constructed", "mergedSpec", mergedSpec, "cluster", kc.Name)
+
+	logger.V(1).Info("merged TelemetrySpec constructed", "mergedSpec", mergedSpec, "cluster", kc.Name)
+
 	// Confirm telemetry config is valid (e.g. Prometheus is installed if it is requested.)
 	promInstalled, err := telemetry.IsPromInstalled(remoteClient, logger)
 	if err != nil {
 		return result.Error(err)
 	}
+
 	validConfig := telemetry.SpecIsValid(mergedSpec, promInstalled)
 	if !validConfig {
 		return result.Error(errors.New("telemetry spec was invalid for this cluster - is Prometheus installed if you have requested it"))
 	}
+
 	// The new metrics endpoint is available since 3.11.13 and 4.0.4.
 	// If MCAC is disabled and the new metrics endpoint is not available then bail here.
 	if !mergedSpec.IsMcacEnabled() && !telemetry.IsNewMetricsEndpointAvailable(actualDc.Spec.ServerVersion) && kc.Spec.Cassandra.ServerType == k8ssandraapi.ServerDistributionCassandra {
@@ -61,9 +62,10 @@ func (r *K8ssandraClusterReconciler) reconcileCassandraDCTelemetry(
 	if !promInstalled {
 		return result.Continue()
 	}
+
 	// Determine if we want a cleanup or a resource update.
 	if mergedSpec.IsPrometheusEnabled() {
-		logger.Info("Prometheus config found", "mergedSpec", mergedSpec)
+		logger.V(1).Info("Prometheus config found", "mergedSpec", mergedSpec)
 		desiredSM, err := cfg.NewCassServiceMonitor(mergedSpec.IsMcacEnabled())
 		if err != nil {
 			return result.Error(err)
@@ -93,12 +95,4 @@ func mustLabels(klusterName string, klusterNamespace string, dcName string, addi
 	additionalLabels[k8ssandraapi.K8ssandraClusterNamespaceLabel] = klusterNamespace
 	additionalLabels[k8ssandraapi.ComponentLabel] = k8ssandraapi.ComponentLabelTelemetry
 	return additionalLabels
-}
-
-// MergeTelemetrySpecs merges the cluster and dc level telemetry specs, prioritizing the dc level spec.
-func MergeTelemetrySpecs(kc *k8ssandraapi.K8ssandraCluster, dcTemplate k8ssandraapi.CassandraDatacenterTemplate) *v1alpha1.TelemetrySpec {
-	clusterSpec := kc.Spec.Cassandra.DatacenterOptions.Telemetry
-	dcSpec := dcTemplate.DatacenterOptions.Telemetry
-	mergedSpec := dcSpec.MergeWith(clusterSpec)
-	return mergedSpec
 }

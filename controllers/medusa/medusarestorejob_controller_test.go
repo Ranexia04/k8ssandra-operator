@@ -33,6 +33,23 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 	require.NoError(err)
 	k8sCtx0 := f.DataPlaneContexts[0]
 
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      "medusa-client-secret",
+		},
+		Data: map[string][]byte{
+			"ca.crt": []byte(`-----BEGIN CERTIFICATE-----
+-----END CERTIFICATE-----`),
+			"tls.crt": []byte(`-----BEGIN CERTIFICATE-----`),
+			"tls.key": []byte(`-----BEGIN CERTIFICATE-----
+-----END CERTIFICATE-----`),
+		},
+	}
+	secretKey := framework.NewClusterKey(k8sCtx0, namespace, "medusa-client-secret")
+	require.NoError(f.Create(ctx, secretKey, secret), "failed to create medusa-client-secret")
+	t.Logf("Created secret: %s/%s", secret.Namespace, secret.Name)
+
 	kc := &k8ss.K8ssandraCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
@@ -72,6 +89,10 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 				},
 				ServiceProperties: api.Service{
 					GrpcPort: 4567,
+					Encryption: &api.GRPCEncryption{
+						ClientSecretName: "medusa-client-secret",
+						ServerSecretName: "medusa-server-secret",
+					},
 				},
 				CassandraUserSecretRef: corev1.LocalObjectReference{
 					Name: cassandraUserSecret,
@@ -85,7 +106,7 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 
 	reconcileReplicatedSecret(ctx, t, f, kc)
 	t.Log("check that dc1 was created")
-	dc1Key := framework.NewClusterKey(f.DataPlaneContexts[0], namespace, "dc1")
+	dc1Key := framework.NewClusterKey(k8sCtx0, namespace, "dc1")
 	require.Eventually(f.DatacenterExists(ctx, dc1Key), timeout, interval)
 
 	t.Log("update datacenter status to scaling up")
@@ -120,7 +141,7 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 			return false
 		}
 
-		condition := findDatacenterCondition(k8ssandraStatus.Cassandra, cassdcapi.DatacenterScalingUp)
+		condition := findDatacenterScalingUpCondition(k8ssandraStatus.Cassandra)
 		return condition != nil && condition.Status == corev1.ConditionTrue
 	}, timeout, interval, "timed out waiting for K8ssandraCluster status update")
 
@@ -136,7 +157,9 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 	require.NoError(err, "failed to update dc1 status to ready")
 
 	dc1 := &cassdcapi.CassandraDatacenter{}
-	err = f.Get(ctx, dc1Key, dc1)
+	require.NoError(f.Get(ctx, dc1Key, dc1))
+	require.True(metav1.HasAnnotation(dc1.ObjectMeta, medusa.MedusaClientSecretNameAnnotation))
+	require.Equal("medusa-client-secret", dc1.Annotations[medusa.MedusaClientSecretNameAnnotation])
 
 	err = createCassandraPods(t, f, ctx, dc1Key, dc1)
 	require.NoError(err)
@@ -189,7 +212,7 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 		},
 	}
 
-	restoreKey := framework.NewClusterKey(dc1Key.K8sContext, dc1Key.Namespace, restore.ObjectMeta.Name)
+	restoreKey := framework.NewClusterKey(dc1Key.K8sContext, dc1Key.Namespace, restore.Name)
 	err = f.Create(ctx, restoreKey, restore)
 	require.NoError(err, "failed to create MedusaRestoreJob")
 
@@ -208,7 +231,7 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 	err = f.Get(ctx, restoreKey, restore)
 	require.NoError(err, "failed to get MedusaRestoreJob")
 
-	dcStoppedTime := restore.Status.StartTime.Time.Add(1 * time.Second)
+	dcStoppedTime := restore.Status.StartTime.Add(1 * time.Second)
 
 	t.Log("set datacenter status to stopped")
 	err = f.PatchDatacenterStatus(ctx, dc1Key, func(dc *cassdcapi.CassandraDatacenter) {
@@ -303,7 +326,6 @@ func testMedusaRestoreDatacenter(t *testing.T, ctx context.Context, f *framework
 
 	err = f.DeleteK8ssandraCluster(ctx, client.ObjectKey{Namespace: dc.Namespace, Name: kc.Name}, timeout, interval)
 	require.NoError(err, "failed to delete K8ssandraCluster")
-
 }
 
 func createCassandraPods(t *testing.T, f *framework.Framework, ctx context.Context, dcKey framework.ClusterKey, dc *cassdcapi.CassandraDatacenter) error {
@@ -432,7 +454,7 @@ func testValidationErrorStopsRestore(t *testing.T, ctx context.Context, f *frame
 			return false
 		}
 
-		condition := findDatacenterCondition(k8ssandraStatus.Cassandra, cassdcapi.DatacenterScalingUp)
+		condition := findDatacenterScalingUpCondition(k8ssandraStatus.Cassandra)
 		return condition != nil && condition.Status == corev1.ConditionTrue
 	}, timeout, interval, "timed out waiting for K8ssandraCluster status update")
 
@@ -498,7 +520,7 @@ func testValidationErrorStopsRestore(t *testing.T, ctx context.Context, f *frame
 		},
 	}
 
-	restoreKey := framework.NewClusterKey(dc1Key.K8sContext, dc1Key.Namespace, restore.ObjectMeta.Name)
+	restoreKey := framework.NewClusterKey(dc1Key.K8sContext, dc1Key.Namespace, restore.Name)
 	err = f.Create(ctx, restoreKey, restore)
 	require.NoError(err, "failed to create MedusaRestoreJob")
 
@@ -618,6 +640,10 @@ func (f *fakeMedusaRestoreClientFactory) NewClient(address string) (medusa.Clien
 		f.clients[address] = newFakeMedusaRestoreClient()
 	}
 	return f.clients[address], nil
+}
+
+func (f *fakeMedusaRestoreClientFactory) NewClientWithTLS(address string, secret *corev1.Secret) (medusa.Client, error) {
+	return f.NewClient(address)
 }
 
 type fakeMedusaRestoreClient struct {

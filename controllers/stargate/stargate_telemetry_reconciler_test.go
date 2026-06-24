@@ -47,7 +47,7 @@ func Test_reconcileStargateTelemetry_succeeds(t *testing.T) {
 		ServiceMonitorName:   GetStargatePromSMName(stargate.Name),
 		CommonLabels:         map[string]string{k8ssandraapi.K8ssandraClusterNameLabel: "test-cluster-name", "test-label": "test"},
 	}
-	_, err := r.reconcileStargateTelemetry(ctx, &stargate, testLogger, fakeClient)
+	err := r.reconcileStargateTelemetry(ctx, &stargate, testLogger, fakeClient)
 	if err != nil {
 		assert.Fail(t, "reconciliation failed", err)
 	}
@@ -56,6 +56,6 @@ func Test_reconcileStargateTelemetry_succeeds(t *testing.T) {
 		assert.Fail(t, "could not get actual ServiceMonitor after reconciling k8ssandra cluster", err)
 	}
 	assert.NotEmpty(t, currentSM.Spec.Endpoints)
-	assert.Equal(t, stargate.Name, currentSM.Spec.Endpoints[0].MetricRelabelConfigs[0].Replacement)
+	assert.Equal(t, stargate.Name, *currentSM.Spec.Endpoints[0].MetricRelabelConfigs[0].Replacement)
 	assert.Contains(t, currentSM.Labels, "test-label")
 }

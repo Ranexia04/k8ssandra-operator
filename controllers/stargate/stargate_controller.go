@@ -23,12 +23,12 @@ import (
 
 	"github.com/go-logr/logr"
 	cassdcapi "github.com/k8ssandra/cass-operator/apis/cassandra/v1beta1"
+	cassimages "github.com/k8ssandra/cass-operator/pkg/images"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/annotations"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/cassandra"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/config"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/labels"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/reconciliation"
-	"github.com/k8ssandra/k8ssandra-operator/pkg/stargate"
 	stargateutil "github.com/k8ssandra/k8ssandra-operator/pkg/stargate"
 	"gopkg.in/yaml.v2"
 	appsv1 "k8s.io/api/apps/v1"
@@ -61,6 +61,7 @@ type StargateReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	ManagementApi cassandra.ManagementApiFactory
+	Registry      cassimages.ImageRegistry
 }
 
 func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -73,9 +74,8 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if errors.IsNotFound(err) {
 			logger.Info("Stargate resource not found", "Stargate", req.NamespacedName)
 			return ctrl.Result{}, nil
-		} else {
-			return ctrl.Result{}, err
 		}
+		return ctrl.Result{}, err
 	}
 	stargate = stargate.DeepCopy()
 
@@ -203,7 +203,7 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Compute the desired deployments
-	desiredDeployments := stargateutil.NewDeployments(stargate, actualDc, logger)
+	desiredDeployments := stargateutil.NewDeployments(stargate, actualDc, logger, r.Registry)
 
 	// Transition status from Created/Pending to Deploying
 	if stargate.Status.Progress == api.StargateProgressPending {
@@ -247,7 +247,7 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return ctrl.Result{}, err
 			} else {
 				logger.Info("Stargate Deployment deleted successfully", "Deployment", deploymentKey)
-				return ctrl.Result{RequeueAfter: r.ReconcilerConfig.LongDelay}, nil
+				return ctrl.Result{RequeueAfter: r.LongDelay}, nil
 			}
 		} else {
 			// Deployment already exists: check if it needs to be updated
@@ -265,7 +265,7 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					return ctrl.Result{}, err
 				} else {
 					logger.Info("Stargate Deployment updated successfully", "Deployment", deploymentKey)
-					return ctrl.Result{RequeueAfter: r.ReconcilerConfig.LongDelay}, nil
+					return ctrl.Result{RequeueAfter: r.LongDelay}, nil
 				}
 			}
 			logger.Info("Deleting Stargate desired deployment", "Deployment", actualDeployment.Name)
@@ -296,11 +296,11 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 		} else {
 			logger.Info("Stargate Deployment created successfully", "Deployment", deploymentKey)
-			return ctrl.Result{RequeueAfter: r.ReconcilerConfig.LongDelay}, nil
+			return ctrl.Result{RequeueAfter: r.LongDelay}, nil
 		}
 	}
 
-	_, err := r.reconcileStargateTelemetry(ctx, stargate, logger, r.Client)
+	err := r.reconcileStargateTelemetry(ctx, stargate, logger, r.Client)
 	if err != nil {
 		logger.Error(err, "reconcileStargateTelemetry failed")
 		return ctrl.Result{}, err
@@ -334,7 +334,7 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 		}
 		logger.Info("Waiting for deployments to be rolled out", "Stargate", req.NamespacedName)
-		return ctrl.Result{RequeueAfter: r.ReconcilerConfig.DefaultDelay}, nil
+		return ctrl.Result{RequeueAfter: r.DefaultDelay}, nil
 	}
 
 	// Compute the desired service
@@ -362,7 +362,7 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 			} else {
 				logger.Info("Stargate Service created successfully", "Service", serviceKey)
-				return ctrl.Result{RequeueAfter: r.ReconcilerConfig.DefaultDelay}, nil
+				return ctrl.Result{RequeueAfter: r.DefaultDelay}, nil
 			}
 		} else {
 			logger.Error(err, "Failed to fetch Stargate Service", "Service", serviceKey)
@@ -385,7 +385,7 @@ func (r *StargateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		} else {
 			logger.Info("Stargate Service updated successfully", "Service", serviceKey)
-			return ctrl.Result{RequeueAfter: r.ReconcilerConfig.LongDelay}, nil
+			return ctrl.Result{RequeueAfter: r.LongDelay}, nil
 		}
 	}
 
@@ -422,10 +422,10 @@ func (r *StargateReconciler) reconcileStargateConfigMap(
 
 	var cassandraYaml, cqlYaml string
 	var err error
-	if cassandraYaml, err = reconcileStargateConfigFile(userCassandraYaml, dcConfig, stargate.CassandraYamlRetainedSettings); err != nil {
+	if cassandraYaml, err = reconcileStargateConfigFile(userCassandraYaml, dcConfig, stargateutil.CassandraYamlRetainedSettings); err != nil {
 		return ctrl.Result{}, err
 	}
-	if cqlYaml, err = reconcileStargateConfigFile(userCqlYaml, dcConfig, stargate.CqlYamlRetainedSettings); err != nil {
+	if cqlYaml, err = reconcileStargateConfigFile(userCqlYaml, dcConfig, stargateutil.CqlYamlRetainedSettings); err != nil {
 		return ctrl.Result{}, err
 	}
 	if len(cqlYaml) == 0 {
@@ -435,11 +435,11 @@ func (r *StargateReconciler) reconcileStargateConfigMap(
 
 	configMapKey := client.ObjectKey{
 		Namespace: namespace,
-		Name:      stargate.GeneratedConfigMapName(dc.Spec.ClusterName, dc.DatacenterName()),
+		Name:      stargateutil.GeneratedConfigMapName(dc.Spec.ClusterName, dc.DatacenterName()),
 	}
 
 	logger = logger.WithValues("StargateConfigMap", configMapKey)
-	desiredConfigMap := stargate.CreateStargateConfigMap(namespace, cassandraYaml, cqlYaml, dc)
+	desiredConfigMap := stargateutil.CreateStargateConfigMap(namespace, cassandraYaml, cqlYaml, dc)
 	// Compute a hash which will allow to compare desired and actual configMaps
 	annotations.AddHashAnnotation(desiredConfigMap)
 	if err = controllerutil.SetControllerReference(stargateObject, desiredConfigMap, r.Scheme); err != nil {
@@ -462,7 +462,7 @@ func reconcileStargateConfigFile(
 	var dcYaml map[string]interface{}
 	dcFullYaml, exists := dcConfig["cassandra-yaml"]
 	if exists {
-		dcYaml = stargate.FilterConfig(dcFullYaml.(map[string]interface{}), retainedOptions)
+		dcYaml = stargateutil.FilterConfig(dcFullYaml.(map[string]interface{}), retainedOptions)
 	}
 	dcYamlString := ""
 	if len(dcYaml) > 0 {
@@ -472,7 +472,7 @@ func reconcileStargateConfigFile(
 			dcYamlString = string(out)
 		}
 	}
-	return stargate.MergeYamlString(userConfig, dcYamlString), nil
+	return stargateutil.MergeYamlString(userConfig, dcYamlString), nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

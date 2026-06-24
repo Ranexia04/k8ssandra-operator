@@ -4,15 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	cassimages "github.com/k8ssandra/cass-operator/pkg/images"
 	telemetryapi "github.com/k8ssandra/k8ssandra-operator/apis/telemetry/v1alpha1"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/encryption"
 	"github.com/k8ssandra/k8ssandra-operator/pkg/stargate"
 	promapi "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/ptr"
 
 	cassdcapi "github.com/k8ssandra/cass-operator/apis/cassandra/v1beta1"
@@ -42,8 +44,8 @@ var managementApiFactory = &testutils.FakeManagementApiFactory{}
 func TestStargate(t *testing.T) {
 	t.Skip("Skipping Stargate tests as they are deprecated and will be removed in a future release")
 
-	os.Setenv("REQUEUE_DEFAULT_DELAY", "10ms")
-	os.Setenv("REQUEUE_LONG_DELAY", "10ms")
+	_ = os.Setenv("REQUEUE_DEFAULT_DELAY", "10ms")
+	_ = os.Setenv("REQUEUE_LONG_DELAY", "10ms")
 
 	ctx := testutils.TestSetup(t)
 	ctx, cancel := context.WithCancel(ctx)
@@ -54,6 +56,7 @@ func TestStargate(t *testing.T) {
 			Client:           mgr.GetClient(),
 			Scheme:           scheme.Scheme,
 			ManagementApi:    managementApiFactory,
+			Registry:         getTestImageRegistry(),
 		}).SetupWithManager(mgr)
 		return err
 	})
@@ -87,7 +90,6 @@ func TestStargate(t *testing.T) {
 }
 
 func testCreateStargateSingleRack(t *testing.T, ctx context.Context, testClient client.Client) {
-
 	namespace := "default"
 
 	dc := &cassdcapi.CassandraDatacenter{
@@ -241,7 +243,7 @@ func testCreateStargateSingleRack(t *testing.T, ctx context.Context, testClient 
 	assert.Eventually(t, func() bool {
 		err := testClient.Get(ctx, smKey, sm)
 		if err != nil {
-			return k8serrors.IsNotFound(err)
+			return errors.IsNotFound(err)
 		}
 		return false
 	}, timeout, interval)
@@ -253,7 +255,7 @@ func testCreateStargateSingleRack(t *testing.T, ctx context.Context, testClient 
 	assert.Eventually(t, func() bool {
 		dc := &cassdcapi.CassandraDatacenter{}
 		err := testClient.Get(ctx, dcKey, dc)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "dc was never deleted")
 
 	// Delete stargate and verify it is deleted
@@ -263,12 +265,11 @@ func testCreateStargateSingleRack(t *testing.T, ctx context.Context, testClient 
 	assert.Eventually(t, func() bool {
 		sg := &api.Stargate{}
 		err := testClient.Get(ctx, stargateKey, sg)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "stargate was never deleted")
 }
 
 func testCreateStargateMultiRack(t *testing.T, ctx context.Context, testClient client.Client) {
-
 	namespace := "default"
 
 	dc := &cassdcapi.CassandraDatacenter{
@@ -457,7 +458,7 @@ func testCreateStargateMultiRack(t *testing.T, ctx context.Context, testClient c
 	assert.Eventually(t, func() bool {
 		dc := &cassdcapi.CassandraDatacenter{}
 		err := testClient.Get(ctx, dcKey, dc)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "dc was never deleted")
 
 	// Delete stargate and verify it is deleted
@@ -467,12 +468,11 @@ func testCreateStargateMultiRack(t *testing.T, ctx context.Context, testClient c
 	assert.Eventually(t, func() bool {
 		sg := &api.Stargate{}
 		err := testClient.Get(ctx, stargateKey, sg)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "stargate was never deleted")
 }
 
 func testCreateStargateEncryption(t *testing.T, ctx context.Context, testClient client.Client) {
-
 	namespace := "default"
 
 	// Create the client keystore and truststore secrets
@@ -693,7 +693,7 @@ func testCreateStargateEncryption(t *testing.T, ctx context.Context, testClient 
 	assert.NotNil(t, sg.Status.ServiceRef)
 
 	sgConfigMap := corev1.ConfigMap{}
-	sgConfigMapKey := client.ObjectKey{Namespace: namespace, Name: stargate.GeneratedConfigMapName(dc.Spec.ClusterName, dc.ObjectMeta.Name)}
+	sgConfigMapKey := client.ObjectKey{Namespace: namespace, Name: stargate.GeneratedConfigMapName(dc.Spec.ClusterName, dc.Name)}
 	err = testClient.Get(ctx, sgConfigMapKey, &sgConfigMap)
 	assert.NoError(t, err, "failed to get stargate cassandra yaml config map")
 
@@ -720,7 +720,7 @@ func testCreateStargateEncryption(t *testing.T, ctx context.Context, testClient 
 	assert.Eventually(t, func() bool {
 		err := testClient.Get(ctx, smKey, sm)
 		if err != nil {
-			return k8serrors.IsNotFound(err)
+			return errors.IsNotFound(err)
 		}
 		return false
 	}, timeout, interval)
@@ -732,7 +732,7 @@ func testCreateStargateEncryption(t *testing.T, ctx context.Context, testClient 
 	assert.Eventually(t, func() bool {
 		dc := &cassdcapi.CassandraDatacenter{}
 		err := testClient.Get(ctx, dcKey, dc)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "dc was never deleted")
 
 	// Delete stargate and verify it is deleted
@@ -742,13 +742,11 @@ func testCreateStargateEncryption(t *testing.T, ctx context.Context, testClient 
 	assert.Eventually(t, func() bool {
 		sg := &api.Stargate{}
 		err := testClient.Get(ctx, stargateKey, sg)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "stargate was never deleted")
-
 }
 
 func testCreateStargateEncryptionExternalSecrets(t *testing.T, ctx context.Context, testClient client.Client) {
-
 	namespace := "default"
 
 	// Create the client keystore and truststore secrets
@@ -974,7 +972,7 @@ func testCreateStargateEncryptionExternalSecrets(t *testing.T, ctx context.Conte
 	assert.NotNil(t, sg.Status.ServiceRef)
 
 	sgConfigMap := corev1.ConfigMap{}
-	sgConfigMapKey := client.ObjectKey{Namespace: namespace, Name: stargate.GeneratedConfigMapName(dc.Spec.ClusterName, dc.ObjectMeta.Name)}
+	sgConfigMapKey := client.ObjectKey{Namespace: namespace, Name: stargate.GeneratedConfigMapName(dc.Spec.ClusterName, dc.Name)}
 	err = testClient.Get(ctx, sgConfigMapKey, &sgConfigMap)
 	assert.NoError(t, err, "failed to get stargate cassandra yaml config map")
 
@@ -1001,7 +999,7 @@ func testCreateStargateEncryptionExternalSecrets(t *testing.T, ctx context.Conte
 	assert.Eventually(t, func() bool {
 		err := testClient.Get(ctx, smKey, sm)
 		if err != nil {
-			return k8serrors.IsNotFound(err)
+			return errors.IsNotFound(err)
 		}
 		return false
 	}, timeout, interval)
@@ -1013,7 +1011,7 @@ func testCreateStargateEncryptionExternalSecrets(t *testing.T, ctx context.Conte
 	assert.Eventually(t, func() bool {
 		dc := &cassdcapi.CassandraDatacenter{}
 		err := testClient.Get(ctx, dcKey, dc)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "dc was never deleted")
 
 	// Delete stargate and verify it is deleted
@@ -1023,7 +1021,24 @@ func testCreateStargateEncryptionExternalSecrets(t *testing.T, ctx context.Conte
 	assert.Eventually(t, func() bool {
 		sg := &api.Stargate{}
 		err := testClient.Get(ctx, stargateKey, sg)
-		return err != nil && k8serrors.IsNotFound(err)
+		return err != nil && errors.IsNotFound(err)
 	}, timeout, interval, "stargate was never deleted")
+}
 
+var (
+	regOnce           sync.Once
+	imageRegistryTest cassimages.ImageRegistry
+)
+
+func getTestImageRegistry() cassimages.ImageRegistry {
+	regOnce.Do(func() {
+		p := filepath.Clean("../../test/testdata/imageconfig/image_config_test.yaml")
+		data, err := os.ReadFile(p)
+		if err == nil {
+			if r, e := cassimages.NewImageRegistryV2(data); e == nil {
+				imageRegistryTest = r
+			}
+		}
+	})
+	return imageRegistryTest
 }

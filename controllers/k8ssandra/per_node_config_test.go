@@ -158,7 +158,6 @@ func perNodeConfigTest(ctx context.Context, f *framework.Framework, test perNode
 }
 
 func defaultPerNodeConfiguration(t *testing.T, ctx context.Context, f *framework.Framework, namespace string) {
-
 	kc := &api.K8ssandraCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test1",
@@ -166,13 +165,16 @@ func defaultPerNodeConfiguration(t *testing.T, ctx context.Context, f *framework
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "4.0.1",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						K8sContext: f.DataPlaneContexts[0],
 						Meta:       api.EmbeddedObjectMeta{Name: "dc1"},
 						Size:       5,
 						DatacenterOptions: api.DatacenterOptions{
-							ServerVersion: "4.0.1",
+							ServerVersion: "4.0.18",
 							StorageConfig: &cassdcapi.StorageConfig{
 								CassandraDataVolumeClaimSpec: &corev1.PersistentVolumeClaimSpec{StorageClassName: &defaultStorageClass},
 							},
@@ -188,7 +190,7 @@ func defaultPerNodeConfiguration(t *testing.T, ctx context.Context, f *framework
 						Meta:       api.EmbeddedObjectMeta{Name: "dc2"},
 						Size:       10,
 						DatacenterOptions: api.DatacenterOptions{
-							ServerVersion: "4.0.1",
+							ServerVersion: "4.0.18",
 							StorageConfig: &cassdcapi.StorageConfig{
 								CassandraDataVolumeClaimSpec: &corev1.PersistentVolumeClaimSpec{StorageClassName: &defaultStorageClass},
 							},
@@ -285,7 +287,6 @@ func defaultPerNodeConfiguration(t *testing.T, ctx context.Context, f *framework
 }
 
 func userDefinedPerNodeConfiguration(t *testing.T, ctx context.Context, f *framework.Framework, namespace string) {
-
 	perNodeConfig := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "user-provided-per-node-config",
@@ -308,13 +309,16 @@ func userDefinedPerNodeConfiguration(t *testing.T, ctx context.Context, f *frame
 		},
 		Spec: api.K8ssandraClusterSpec{
 			Cassandra: &api.CassandraClusterTemplate{
+				DatacenterOptions: api.DatacenterOptions{
+					ServerVersion: "4.0.1",
+				},
 				Datacenters: []api.CassandraDatacenterTemplate{
 					{
 						K8sContext: f.DataPlaneContexts[0],
 						Meta:       api.EmbeddedObjectMeta{Name: "dc1"},
 						Size:       3,
 						DatacenterOptions: api.DatacenterOptions{
-							ServerVersion: "4.0.1",
+							ServerVersion: "4.0.18",
 							StorageConfig: &cassdcapi.StorageConfig{
 								CassandraDataVolumeClaimSpec: &corev1.PersistentVolumeClaimSpec{StorageClassName: &defaultStorageClass},
 							},
