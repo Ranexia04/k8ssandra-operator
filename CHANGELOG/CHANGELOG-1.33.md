@@ -19,5 +19,6 @@ When cutting a new release, update the `unreleased` heading to the tag being gen
 * [CHANGE] Bump k8ssandra-client to v0.8.13, medusa to v0.29.0 and reaper to v4.2.4
 * [CHANGE] Bump cassandra-medusa to v0.30.0
 * [ENHANCEMENT] [#1760](https://github.com/k8ssandra/k8ssandra-operator/issues/1760) Allow setting Medusa's chunk size
+* [ENHANCEMENT] [#952](https://github.com/k8ssandra/k8ssandra-operator/issues/952) Set an owner reference on the CassandraDatacenter pointing to the K8ssandraCluster when they are co-located (same namespace and cluster). This improves visibility in tools like ArgoCD. Cross-namespace/cluster deployments are unaffected and keep relying on labels and finalizers.
 * [BUGFIX] Medusa Configurations aren't replicated to remote contexts
 * [BUGFIX] [#1415](https://github.com/k8ssandra/k8ssandra-operator/issues/1415) Trigger k8ssandrcluster reconcile on referenced MedusaConfiguration update
